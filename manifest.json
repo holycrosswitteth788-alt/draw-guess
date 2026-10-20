@@ -1,0 +1,41 @@
+{
+    "@platforms" : [ "android", "iPhone", "iPad", "chrome" ],
+    "id" : "H5D8A2C1F",
+    "name" : "DrawGuess",
+    "version" : {
+        "name" : "1.0.0",
+        "code" : "100"
+    },
+    "description" : "双人 1V1 联机你画我猜（PeerJS WebRTC P2P）",
+    "launch_path" : "index.html",
+    "developer" : {
+        "name" : "",
+        "email" : "",
+        "url" : ""
+    },
+    "permissions" : {
+        "Webview": {}
+    },
+    "plus" : {
+        "statusbar": {
+            "immersed": "supportedDevice",
+            "style": "dark",
+            "background": "#F4F6FB"
+        },
+        "splashscreen": {
+            "autoclose": true,
+            "waiting": true
+        },
+        "popGesture": "close",
+        "distribute" : {
+            "google" : {
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>"
+                ]
+            },
+            "apple" : {},
+            "orientation" : [ "portrait-primary" ]
+        }
+    }
+}

@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>你画我猜 · 双人联机</title>
+<style>
+  :root{
+    --bg:#f4f6fb;
+    --panel:#ffffff;
+    --line:#e3e8f0;
+    --text:#1f2937;
+    --sub:#6b7280;
+    --brand:#4f7cff;
+    --brand-2:#7c5cff;
+    --ok:#12b76a;
+    --warn:#f79009;
+    --danger:#ef4444;
+    --radius:16px;
+    --shadow:0 4px 20px rgba(31,41,55,.08);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(160deg,#eef2ff 0%,#f7f9ff 45%,#f4f6fb 100%);
+    color:var(--text);
+    overflow:hidden;
+  }
+
+  /* ---------- 布局 ---------- */
+  .app{
+    height:100vh;
+    height:100dvh;
+    display:flex;
+    flex-direction:column;
+    padding:10px;
+    gap:10px;
+  }
+  header{
+    display:flex;align-items:center;gap:10px;
+    padding:0 4px;
+    flex:0 0 auto;
+  }
+  .logo{
+    display:flex;align-items:center;gap:8px;
+    font-weight:700;font-size:16px;letter-spacing:.3px;
+  }
+  .logo .dot{
+    width:10px;height:10px;border-radius:50%;
+    background:linear-gradient(135deg,var(--brand),var(--brand-2));
+    box-shadow:0 0 0 4px rgba(79,124,255,.12);
+  }
+  .status{
+    margin-left:auto;
+    display:flex;align-items:center;gap:6px;
+    font-size:12px;color:var(--sub);
+    background:var(--panel);
+    border:1px solid var(--line);
+    padding:5px 10px;border-radius:999px;
+    box-shadow:var(--shadow);
+  }
+  .status i{
+    width:7px;height:7px;border-radius:50%;background:#c7cede;display:inline-block;
+    transition:.25s;
+  }
+  .status.on i{background:var(--ok);box-shadow:0 0 0 3px rgba(18,183,106,.15);}
+  .status.wait i{background:var(--warn);box-shadow:0 0 0 3px rgba(247,144,9,.15);animation:blink 1.2s infinite;}
+  @keyframes blink{50%{opacity:.35;}}
+
+  main{
+    flex:1 1 auto;
+    display:flex;gap:10px;
+    min-height:0;
+  }
+
+  /* ---------- 左侧：画板区 ---------- */
+  .stage{
+    flex:1 1 auto;
+    display:flex;flex-direction:column;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    overflow:hidden;
+    min-width:0;
+  }
+  .stage-head{
+    display:flex;align-items:center;gap:8px;
+    padding:8px 10px;
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+    flex:0 0 auto;
+  }
+  .round-badge{
+    font-size:12px;font-weight:600;
+    color:#fff;
+    background:linear-gradient(135deg,var(--brand),var(--brand-2));
+    padding:4px 10px;border-radius:999px;
+    white-space:nowrap;
+  }
+  .timer{
+    font-size:12px;font-weight:700;color:var(--brand);
+    background:#eef2ff;padding:4px 9px;border-radius:999px;
+    font-variant-numeric:tabular-nums;
+  }
+  .timer.hot{color:var(--danger);background:#fef2f2;}
+  .score{
+    font-size:12px;font-weight:600;color:var(--sub);
+    background:#f4f6fb;padding:4px 9px;border-radius:999px;
+    font-variant-numeric:tabular-nums;white-space:nowrap;
+  }
+
+  /* 颜色 / 工具 */
+  .tools{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap;}
+  .swatch{
+    width:22px;height:22px;border-radius:50%;
+    border:2px solid #fff;
+    box-shadow:0 0 0 1.5px var(--line);
+    cursor:pointer;
+    transition:transform .15s, box-shadow .15s;
+    padding:0;
+  }
+  .swatch:hover{transform:scale(1.12);}
+  .swatch.active{box-shadow:0 0 0 2px var(--brand);transform:scale(1.12);}
+  .sizes{display:flex;align-items:center;gap:4px;}
+  .size-btn{
+    width:26px;height:26px;border-radius:8px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;display:grid;place-items:center;padding:0;
+    transition:.15s;
+  }
+  .size-btn span{display:block;border-radius:50%;background:#374151;}
+  .size-btn.active{border-color:var(--brand);background:#eef2ff;}
+  .icon-btn{
+    height:26px;min-width:26px;
+    border:1px solid var(--line);background:#fff;border-radius:8px;
+    cursor:pointer;font-size:12px;color:var(--sub);
+    display:inline-flex;align-items:center;justify-content:center;gap:4px;
+    padding:0 8px;transition:.15s;
+  }
+  .icon-btn:hover{border-color:var(--brand);color:var(--brand);}
+  .icon-btn.active{border-color:var(--brand);color:#fff;background:var(--brand);}
+  .icon-btn:disabled{opacity:.4;cursor:not-allowed;}
+
+  .canvas-wrap{
+    flex:1 1 auto;
+    position:relative;
+    min-height:0;
+    background:#fff;
+    background-image:linear-gradient(#f3f5fa 1px,transparent 1px),linear-gradient(90deg,#f3f5fa 1px,transparent 1px);
+    background-size:24px 24px;
+  }
+  #board{
+    position:absolute;inset:0;
+    width:100%;height:100%;
+    display:block;
+    touch-action:none;
+    cursor:crosshair;
+  }
+  #board.locked{cursor:not-allowed;}
+
+  .overlay{
+    position:absolute;inset:0;
+    display:grid;place-items:center;
+    background:rgba(255,255,255,.82);
+    backdrop-filter:blur(3px);
+    font-size:13px;color:var(--sub);
+    text-align:center;padding:20px;
+    z-index:5;
+    transition:opacity .25s;
+  }
+  .overlay.hide{opacity:0;pointer-events:none;}
+  .overlay b{display:block;font-size:22px;color:var(--text);margin-bottom:6px;letter-spacing:2px;}
+
+  /* ---------- 右侧：聊天 ---------- */
+  .chat{
+    flex:0 0 300px;
+    display:flex;flex-direction:column;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    overflow:hidden;
+    min-height:0;
+  }
+  .chat-head{
+    padding:10px 12px;
+    border-bottom:1px solid var(--line);
+    font-size:13px;font-weight:600;
+    display:flex;align-items:center;gap:6px;
+    flex:0 0 auto;
+  }
+  .chat-head .role{
+    margin-left:auto;font-size:11px;font-weight:500;
+    color:var(--brand);background:#eef2ff;padding:3px 8px;border-radius:999px;
+  }
+  .chat-head .role.guess{color:var(--ok);background:#ecfdf3;}
+  .msg-list{
+    flex:1 1 auto;
+    overflow-y:auto;
+    padding:10px;
+    display:flex;flex-direction:column;gap:8px;
+    min-height:0;
+    scroll-behavior:smooth;
+  }
+  .msg{
+    max-width:88%;
+    font-size:13px;line-height:1.5;
+    padding:7px 11px;
+    border-radius:12px;
+    word-break:break-word;
+    animation:pop .18s ease-out;
+  }
+  @keyframes pop{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+  .msg.me{align-self:flex-end;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border-bottom-right-radius:4px;}
+  .msg.other{align-self:flex-start;background:#f1f4f9;color:var(--text);border-bottom-left-radius:4px;}
+  .msg.sys{
+    align-self:center;background:transparent;color:var(--sub);
+    font-size:11.5px;text-align:center;padding:2px 6px;max-width:100%;
+  }
+  .msg.sys.correct{color:var(--ok);font-weight:600;}
+  .msg .who{font-size:10.5px;opacity:.7;display:block;margin-bottom:1px;}
+
+  .chat-input{
+    display:flex;gap:6px;
+    padding:8px;
+    border-top:1px solid var(--line);
+    flex:0 0 auto;
+    background:#fbfcfe;
+  }
+  .chat-input input{
+    flex:1;min-width:0;
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:9px 11px;
+    font-size:13px;
+    outline:none;
+    transition:.15s;
+    font-family:inherit;
+    background:#fff;
+  }
+  .chat-input input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(79,124,255,.12);}
+  .send-btn{
+    border:none;border-radius:10px;
+    background:linear-gradient(135deg,var(--brand),var(--brand-2));
+    color:#fff;font-size:13px;font-weight:600;
+    padding:0 16px;cursor:pointer;
+    transition:.15s;
+  }
+  .send-btn:active{transform:scale(.96);}
+
+  /* ---------- 连接弹窗 ---------- */
+  .modal{
+    position:fixed;inset:0;z-index:50;
+    display:grid;place-items:center;
+    background:rgba(23,30,46,.42);
+    backdrop-filter:blur(6px);
+    padding:16px;
+  }
+  .modal.hide{display:none;}
+  .card{
+    width:100%;max-width:400px;
+    background:#fff;
+    border-radius:20px;
+    padding:24px;
+    box-shadow:0 24px 60px rgba(23,30,46,.24);
+    animation:rise .28s cubic-bezier(.2,.9,.3,1.1);
+  }
+  @keyframes rise{from{opacity:0;transform:translateY(16px) scale(.97);}to{opacity:1;transform:none;}}
+  .card h1{
+    margin:0 0 4px;font-size:20px;letter-spacing:-.4px;
+  }
+  .card p.sub{margin:0 0 18px;font-size:12.5px;color:var(--sub);line-height:1.6;}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--sub);margin-bottom:6px;}
+  .field input{
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:11px;
+    padding:11px 13px;
+    font-size:14px;
+    outline:none;font-family:inherit;
+    transition:.15s;
+  }
+  .field input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(79,124,255,.12);}
+  .btn{
+    width:100%;
+    border:none;
+    border-radius:11px;
+    padding:12px;
+    font-size:14px;font-weight:600;
+    cursor:pointer;
+    transition:.16s;
+    font-family:inherit;
+  }
+  .btn:active{transform:scale(.985);}
+  .btn.primary{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;box-shadow:0 8px 20px rgba(79,124,255,.28);}
+  .btn.primary:disabled{opacity:.55;cursor:wait;box-shadow:none;}
+  .btn.ghost{background:#f1f4f9;color:var(--text);margin-top:8px;}
+  .divider{display:flex;align-items:center;gap:10px;color:#c2cad8;font-size:11px;margin:16px 0;}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line);}
+  .room-box{
+    display:none;
+    margin-top:14px;
+    background:#f7f9ff;
+    border:1px dashed #c9d6fb;
+    border-radius:13px;
+    padding:14px;
+    text-align:center;
+  }
+  .room-box.show{display:block;animation:pop .2s;}
+  .room-box .code{
+    font-size:26px;font-weight:800;letter-spacing:3px;
+    color:var(--brand);
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    margin:4px 0 10px;
+    word-break:break-all;
+  }
+  .room-box small{color:var(--sub);font-size:11.5px;display:block;line-height:1.6;}
+  .err{color:var(--danger);font-size:12px;margin-top:10px;display:none;}
+  .err.show{display:block;}
+
+  .toast{
+    position:fixed;left:50%;bottom:28px;
+    transform:translate(-50%,20px);
+    background:rgba(31,41,55,.92);
+    color:#fff;font-size:13px;
+    padding:10px 18px;border-radius:999px;
+    opacity:0;pointer-events:none;
+    transition:.28s;z-index:99;
+    max-width:88vw;text-align:center;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+
+  /* ---------- 移动端 ---------- */
+  @media (max-width:820px){
+    .app{padding:6px;gap:6px;}
+    header{display:none;}
+    main{flex-direction:column;gap:6px;}
+    .chat{flex:0 0 38%;min-height:150px;}
+    .chat-input input{padding:8px 10px;font-size:16px;} /* 防 iOS 缩放 */
+    .tools{gap:4px;}
+    .swatch{width:20px;height:20px;}
+    .stage-head{padding:6px 8px;gap:6px;}
+    .round-badge,.timer{font-size:11px;padding:3px 8px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="logo"><span class="dot"></span>你画我猜 · 双人联机</div>
+    <div class="status" id="status"><i></i><span id="statusText">未连接</span></div>
+  </header>
+
+  <main>
+    <!-- 画板 -->
+    <section class="stage">
+      <div class="stage-head">
+        <span class="round-badge" id="roundBadge">第 1 轮</span>
+        <span class="timer" id="timer">--</span>
+        <span class="score" id="score">我 0 : 0 对方</span>
+        <div class="tools">
+          <div id="swatches" style="display:flex;gap:5px;"></div>
+          <div class="sizes" id="sizes"></div>
+          <button class="icon-btn" id="btnEraser" title="橡皮">橡皮</button>
+          <button class="icon-btn" id="btnUndo" title="撤销">撤销</button>
+          <button class="icon-btn" id="btnClear" title="清空画板">清空</button>
+        </div>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="board"></canvas>
+        <div class="overlay" id="overlay">
+          <div>
+            <b>等待开始</b>
+            创建或加入房间后即可开始游戏
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 聊天 -->
+    <aside class="chat">
+      <div class="chat-head">
+        猜词 / 聊天
+        <span class="role" id="roleTag">未入房</span>
+      </div>
+      <div class="msg-list" id="msgList"></div>
+      <div class="chat-input">
+        <input id="chatInput" type="text" placeholder="输入猜测或聊天…" maxlength="60" autocomplete="off">
+        <button class="send-btn" id="sendBtn">发送</button>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<!-- 连接弹窗 -->
+<div class="modal" id="modal">
+  <div class="card">
+    <h1>你画我猜 1V1</h1>
+    <p class="sub">创建一个房间，把房间号发给朋友，两人就能直接联机画画了。</p>
+
+    <button class="btn primary" id="btnCreate">创建房间</button>
+
+    <div class="room-box" id="roomBox">
+      <div style="font-size:12px;color:#6b7280;">房间号（发给对方）</div>
+      <div class="code" id="roomCode">------</div>
+      <button class="btn ghost" id="btnCopy" style="margin-top:0;">复制房间号</button>
+      <small style="margin-top:10px;">正在等待对方加入…</small>
+    </div>
+
+    <div class="divider">或者</div>
+
+    <div class="field">
+      <label>输入对方的房间号加入</label>
+      <input id="joinCode" type="text" placeholder="例如 8fk2m1qz" autocomplete="off" spellcheck="false">
+    </div>
+    <button class="btn primary" id="btnJoin" style="background:#1f2937;box-shadow:0 8px 20px rgba(31,41,55,.22);">加入房间</button>
+    <div class="err" id="errMsg"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================
+     1. 常量与状态
+     ========================================================= */
+  const COLORS = ["#111827","#ef4444","#f97316","#eab308","#22c55e","#06b6d4","#3b82f6","#8b5cf6","#ec4899","#78716c"];
+  const SIZES  = [2, 5, 10, 20];
+  const ROUND_SECONDS = 90;
+
+  const WORDS = [
+    "太阳","月亮","苹果","香蕉","西瓜","草莓","猫咪","小狗","兔子","大象",
+    "长颈鹿","蝴蝶","蜜蜂","乌龟","企鹅","熊猫","老虎","孔雀","鲸鱼","海豚",
+    "雨伞","眼镜","自行车","汽车","飞机","火箭","火车","帆船","热气球","摩天轮",
+    "房子","大桥","路灯","消防栓","钟表","台灯","电视","冰箱","洗衣机","相机",
+    "手机","笔记本电脑","耳机","麦克风","钥匙","剪刀","吉他","钢琴","足球","篮球",
+    "雪人","彩虹","星星","云朵","闪电","火山","沙漠","瀑布","蛋糕","冰淇淋",
+    "汉堡","披萨","面条","咖啡","筷子","花瓶","蜡烛","枕头","牙刷","雨靴",
+    "医生","警察","宇航员","厨师","老师","画家","消防员","小丑","仙女","海盗",
+    "跳舞","唱歌","睡觉","跑步","跳绳","钓鱼","刷牙","打喷嚏","放风筝","堆雪人",
+    "生日","婚礼","春运","堵车","加班","理发","排队","考试","拍照","下雨"
+  ];
+
+  const state = {
+    peer: null,
+    conn: null,
+    isHost: false,        // 房主 = 先进入房间画画的人
+    connected: false,
+    roomId: "",
+    // 游戏
+    drawerIsHost: true,   // 谁在画
+    round: 1,
+    word: "",
+    timeLeft: ROUND_SECONDS,
+    timerId: null,
+    myScore: 0,
+    peerScore: 0,
+    roundActive: false,
+    // 画笔
+    color: "#111827",
+    size: 5,
+    erasing: false,
+    drawing: false,
+    lastPt: null,
+    localStrokes: []      // 用于本地撤销
+  };
+
+  /* =========================================================
+     2. DOM 引用
+     ========================================================= */
+  const $ = id => document.getElementById(id);
+  const board      = $("board");
+  const ctx        = board.getContext("2d");
+  const overlay    = $("overlay");
+  const statusEl   = $("status");
+  const statusText = $("statusText");
+  const msgList    = $("msgList");
+  const chatInput  = $("chatInput");
+  const modal      = $("modal");
+  const roomBox    = $("roomBox");
+  const roomCode   = $("roomCode");
+  const errMsg     = $("errMsg");
+  const roleTag    = $("roleTag");
+  const roundBadge = $("roundBadge");
+  const timerEl    = $("timer");
+
+  /* =========================================================
+     3. 工具函数
+     ========================================================= */
+  function toast(text){
+    const t = $("toast");
+    t.textContent = text;
+    t.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(()=>t.classList.remove("show"), 2000);
+  }
+
+  function setStatus(text, mode){
+    statusText.textContent = text;
+    statusEl.className = "status" + (mode ? " " + mode : "");
+  }
+
+  function showErr(text){
+    errMsg.textContent = text;
+    errMsg.classList.add("show");
+  }
+  function clearErr(){
+    errMsg.classList.remove("show");
+  }
+
+  function addMsg(text, type, who){
+    const div = document.createElement("div");
+    div.className = "msg " + type;
+    if (who && type !== "sys"){
+      const w = document.createElement("span");
+      w.className = "who";
+      w.textContent = who;
+      div.appendChild(w);
+    }
+    div.appendChild(document.createTextNode(text));
+    msgList.appendChild(div);
+    // 只保留最近 200 条
+    while (msgList.children.length > 200) msgList.removeChild(msgList.firstChild);
+    msgList.scrollTop = msgList.scrollHeight;
+  }
+
+  function sysMsg(text, cls){
+    addMsg(text, "sys" + (cls ? " " + cls : ""));
+  }
+
+  /* =========================================================
+     4. 画板尺寸 / 绘制
+     ========================================================= */
+  // 使用逻辑坐标系：所有轨迹都按 0~1 的归一化坐标传输，
+  // 这样两端屏幕尺寸不同也能对齐。
+  function resizeCanvas(){
+    const dpr = window.devicePixelRatio || 1;
+    const rect = board.getBoundingClientRect();
+    const w = Math.max(1, Math.floor(rect.width * dpr));
+    const h = Math.max(1, Math.floor(rect.height * dpr));
+    if (board.width === w && board.height === h) return;
+
+    // 保存当前画面并还原
+    const snapshot = board.width > 0 && board.height > 0 ? ctx.getImageData(0,0,board.width,board.height) : null;
+    board.width = w;
+    board.height = h;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 之后按 CSS 像素绘制
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    if (snapshot){
+      // 还原时简单缩放贴回（保证旋转屏幕不丢画）
+      const tmp = document.createElement("canvas");
+      tmp.width = snapshot.width; tmp.height = snapshot.height;
+      tmp.getContext("2d").putImageData(snapshot, 0, 0);
+      ctx.save();
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.drawImage(tmp, 0, 0, w, h);
+      ctx.restore();
+    }
+  }
+
+  function cssSize(){
+    const r = board.getBoundingClientRect();
+    return { w: r.width || 1, h: r.height || 1 };
+  }
+
+  function clearBoard(silent){
+    const { w, h } = cssSize();
+    ctx.save();
+    ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.restore();
+    state.localStrokes = [];
+    if (!silent && state.connected) send({ type: "clear" });
+  }
+
+  // 画一段线（归一化坐标）
+  function drawSeg(x0, y0, x1, y1, color, width, erase){
+    const { w, h } = cssSize();
+    ctx.save();
+    ctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(x0 * w, y0 * h);
+    ctx.lineTo(x1 * w, y1 * h);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawDot(x, y, color, width, erase){
+    const { w, h } = cssSize();
+    ctx.save();
+    ctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x * w, y * h, width / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function iAmDrawer(){
+    if (!state.connected) return false;
+    return state.isHost === state.drawerIsHost;
+  }
+
+  function updateBoardLock(){
+    const canDraw = iAmDrawer() && state.roundActive;
+    board.classList.toggle("locked", !canDraw);
+    $("btnClear").disabled = !canDraw;
+    $("btnUndo").disabled  = !canDraw;
+    $("btnEraser").disabled = !canDraw;
+  }
+
+  /* =========================================================
+     5. 绘图交互（Pointer Events 统一鼠标 / 触摸）
+     ========================================================= */
+  function getNorm(e){
+    const r = board.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) / (r.width || 1),
+      y: (e.clientY - r.top) / (r.height || 1)
+    };
+  }
+
+  board.addEventListener("pointerdown", e => {
+    if (!iAmDrawer() || !state.roundActive) return;
+    board.setPointerCapture(e.pointerId);
+    state.drawing = true;
+    const p = getNorm(e);
+    state.lastPt = p;
+    const erase = state.erasing;
+    const width = erase ? state.size * 3 : state.size;
+    const color = state.color;
+
+    drawDot(p.x, p.y, color, width, erase);
+    state.localStrokes.push({ op: "dot", p: [p.x, p.y], c: color, w: width, e: erase ? 1 : 0 });
+    send({ type: "draw", op: "dot", p: [p.x, p.y], c: color, w: width, e: erase ? 1 : 0 });
+  });
+
+  board.addEventListener("pointermove", e => {
+    if (!state.drawing || !iAmDrawer()) return;
+    // 合并事件，提高流畅度
+    let evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    if (!evs || !evs.length) evs = [e];
+    for (const ev of evs){
+      const p = getNorm(ev);
+      const last = state.lastPt;
+      if (!last) { state.lastPt = p; continue; }
+      // 过滤过短线段
+      if (Math.abs(p.x - last.x) < 0.0008 && Math.abs(p.y - last.y) < 0.0008) continue;
+
+      const erase = state.erasing;
+      const width = erase ? state.size * 3 : state.size;
+      const color = state.color;
+
+      drawSeg(last.x, last.y, p.x, p.y, color, width, erase);
+      const seg = { op: "seg", p: [last.x, last.y, p.x, p.y], c: color, w: width, e: erase ? 1 : 0 };
+      state.localStrokes.push(seg);
+      send({ type: "draw", op: "seg", p: seg.p, c: color, w: width, e: erase ? 1 : 0 });
+      state.lastPt = p;
+    }
+  });
+
+  function endStroke(){
+    if (!state.drawing) return;
+    state.drawing = false;
+    state.lastPt = null;
+  }
+  board.addEventListener("pointerup", endStroke);
+  board.addEventListener("pointercancel", endStroke);
+  board.addEventListener("pointerleave", endStroke);
+
+  // 撤销：重放本机保存的笔画（简单可靠）
+  function undo(){
+    if (!iAmDrawer() || !state.roundActive) return;
+    state.localStrokes.pop();
+    const strokes = state.localStrokes.slice();
+    clearBoard(true);
+    for (const s of strokes){
+      if (s.op === "dot") drawDot(s.p[0], s.p[1], s.c, s.w, s.e === 1);
+      else drawSeg(s.p[0], s.p[1], s.p[2], s.p[3], s.c, s.w, s.e === 1);
+    }
+    send({ type: "replay", strokes: strokes });
+  }
+
+  $("btnUndo").addEventListener("click", undo);
+  $("btnClear").addEventListener("click", () => { clearBoard(); });
+  $("btnEraser").addEventListener("click", e => {
+    state.erasing = !state.erasing;
+    e.currentTarget.classList.toggle("active", state.erasing);
+  });
+
+  /* =========================================================
+     6. 工具栏渲染
+     ========================================================= */
+  (function buildTools(){
+    const wrap = $("swatches");
+    COLORS.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.className = "swatch" + (i === 0 ? " active" : "");
+      b.style.background = c;
+      b.setAttribute("aria-label", "颜色 " + c);
+      b.addEventListener("click", () => {
+        state.color = c;
+        state.erasing = false;
+        $("btnEraser").classList.remove("active");
+        wrap.querySelectorAll(".swatch").forEach(s => s.classList.remove("active"));
+        b.classList.add("active");
+      });
+      wrap.appendChild(b);
+    });
+
+    const sWrap = $("sizes");
+    SIZES.forEach((s, i) => {
+      const b = document.createElement("button");
+      b.className = "size-btn" + (i === 1 ? " active" : "");
+      const d = document.createElement("span");
+      const px = Math.max(3, Math.min(14, s));
+      d.style.width = px + "px";
+      d.style.height = px + "px";
+      b.appendChild(d);
+      b.addEventListener("click", () => {
+        state.size = s;
+        sWrap.querySelectorAll(".size-btn").forEach(x => x.classList.remove("active"));
+        b.classList.add("active");
+      });
+      sWrap.appendChild(b);
+    });
+  })();
+
+  /* =========================================================
+     7. PeerJS：创建 / 加入房间
+     ========================================================= */
+  const PEER_OPTS = {
+    debug: 1,
+    config: {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:global.stun.twilio.com:3478" }
+      ]
+    }
+  };
+
+  function makeRoomId(){
+    // 6 位易读房间号（去掉容易混淆的 0/o/1/l）
+    const chars = "23456789abcdefghijkmnpqrstuvwxyz";
+    let s = "";
+    for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+
+  function resetPeer(){
+    if (state.conn){ try{ state.conn.close(); }catch(_){} state.conn = null; }
+    if (state.peer){ try{ state.peer.destroy(); }catch(_){} state.peer = null; }
+    state.connected = false;
+  }
+
+  // --- 创建房间 ---
+  $("btnCreate").addEventListener("click", () => {
+    clearErr();
+    const btn = $("btnCreate");
+    btn.disabled = true;
+    btn.textContent = "正在创建…";
+    resetPeer();
+
+    const id = makeRoomId();
+    const peer = new Peer(id, PEER_OPTS);
+    state.peer = peer;
+    state.isHost = true;
+    state.roomId = id;
+
+    peer.on("open", pid => {
+      btn.disabled = false;
+      btn.textContent = "创建房间";
+      roomCode.textContent = pid;
+      roomBox.classList.add("show");
+      setStatus("等待对方加入…", "wait");
+      sysMsg("房间已创建，房间号：" + pid);
+    });
+
+    peer.on("connection", conn => {
+      if (state.conn && state.conn.open){ conn.close(); return; }
+      state.conn = conn;
+      bindConn(conn);
+    });
+
+    peer.on("error", err => {
+      btn.disabled = false;
+      btn.textContent = "创建房间";
+      if (err.type === "unavailable-id"){
+        // 房间号撞了，自动换一个
+        showErr("房间号被占用，正在重试…");
+        setTimeout(() => $("btnCreate").click(), 400);
+      } else {
+        showErr("创建失败：" + (err.type || err.message || "网络错误"));
+      }
+    });
+  });
+
+  // --- 加入房间 ---
+  $("btnJoin").addEventListener("click", () => {
+    clearErr();
+    const code = ($("joinCode").value || "").trim().toLowerCase();
+    if (!code){ showErr("请先输入房间号"); return; }
+    if (code.length < 4){ showErr("房间号看起来不对，请检查"); return; }
+
+    const btn = $("btnJoin");
+    btn.disabled = true;
+    btn.textContent = "正在连接…";
+    resetPeer();
+
+    const peer = new Peer(PEER_OPTS);
+    state.peer = peer;
+    state.isHost = false;
+    state.roomId = code;
+
+    let opened = false;
+
+    peer.on("open", () => {
+      const conn = peer.connect(code, { reliable: true });
+      state.conn = conn;
+      bindConn(conn);
+
+      // 连接超时保护
+      setTimeout(() => {
+        if (!state.connected){
+          btn.disabled = false;
+          btn.textContent = "加入房间";
+          showErr("连接超时。请确认对方房间还在、房间号正确，且双方网络能互连。");
+        }
+      }, 15000);
+    });
+
+    peer.on("error", err => {
+      btn.disabled = false;
+      btn.textContent = "加入房间";
+      const map = {
+        "peer-unavailable": "找不到这个房间，请检查房间号是否正确。",
+        "network": "无法连接到信令服务器，请检查网络。",
+        "server-error": "信令服务器繁忙，请稍后再试。",
+        "unavailable-id": "ID 冲突，请重试。"
+      };
+      showErr(map[err.type] || ("加入失败：" + (err.type || err.message)));
+    });
+  });
+
+  $("btnCopy").addEventListener("click", async () => {
+    const code = roomCode.textContent;
+    try{
+      await navigator.clipboard.writeText(code);
+      toast("房间号已复制");
+    }catch(_){
+      // 降级
+      const ta = document.createElement("textarea");
+      ta.value = code; document.body.appendChild(ta); ta.select();
+      try{ document.execCommand("copy"); toast("房间号已复制"); }
+      catch(e){ toast("复制失败，请手动记录：" + code); }
+      document.body.removeChild(ta);
+    }
+  });
+
+  $("joinCode").addEventListener("keydown", e => {
+    if (e.key === "Enter") $("btnJoin").click();
+  });
+
+  /* =========================================================
+     8. 连接建立后的握手与消息路由
+     ========================================================= */
+  function bindConn(conn){
+    conn.on("open", () => {
+      state.connected = true;
+      modal.classList.add("hide");
+      overlay.classList.add("hide");
+      setStatus("已连接", "on");
+      roleTag.textContent = state.isHost ? "房主" : "玩家 2";
+      roleTag.className = "role" + (state.isHost ? "" : " guess");
+      $("btnJoin").disabled = false;
+      $("btnJoin").textContent = "加入房间";
+      $("btnCreate").disabled = false;
+      $("btnCreate").textContent = "创建房间";
+
+      // 房主发起游戏
+      if (state.isHost){
+        startRound(true, 1);
+        send({ type: "hello", round: state.round });
+      } else {
+        sysMsg("已加入房间，等待房主开始…");
+      }
+      updateBoardLock();
+    });
+
+    conn.on("data", data => {
+      if (!data || typeof data !== "object") return;
+      handleData(data);
+    });
+
+    conn.on("close", () => {
+      state.connected = false;
+      stopTimer();
+      setStatus("对方已断开", "");
+      overlay.classList.remove("hide");
+      overlay.innerHTML = "<div><b>连接已断开</b>刷新页面可重新开始</div>";
+      updateBoardLock();
+      sysMsg("对方离开了房间");
+      toast("对方已断开连接");
+    });
+
+    conn.on("error", err => {
+      console.warn("conn error", err);
+      toast("连接异常：" + (err.type || err.message || "未知"));
+    });
+  }
+
+  function send(obj){
+    if (state.conn && state.conn.open){
+      try{ state.conn.send(obj); }catch(err){ console.warn("send fail", err); }
+    }
+  }
+
+  function handleData(d){
+    switch(d.type){
+      case "draw": {
+        if (d.op === "dot") drawDot(d.p[0], d.p[1], d.c, d.w, d.e === 1);
+        else drawSeg(d.p[0], d.p[1], d.p[2], d.p[3], d.c, d.w, d.e === 1);
+        break;
+      }
+      case "replay": {
+        clearBoard(true);
+        for (const s of (d.strokes || [])){
+          if (s.op === "dot") drawDot(s.p[0], s.p[1], s.c, s.w, s.e === 1);
+          else drawSeg(s.p[0], s.p[1], s.p[2], s.p[3], s.c, s.w, s.e === 1);
+        }
+        break;
+      }
+      case "clear":
+        clearBoard(true);
+        break;
+
+      case "hello":
+        // 加入方收到房主同步
+        state.round = d.round || 1;
+        break;
+
+      case "round-start":
+        startRound(false, d.round, d.word, d.drawerIsHost);
+        break;
+      case "chat":
+        addMsg(String(d.text).slice(0, 200), "other", d.name || "对方");
+        break;
+
+      case "correct":
+        // 对方猜中了
+        sysMsg(d.raw + " 猜对了！答案是「" + d.word + "」", "correct");
+        state.peerScore += 1;
+        updateScore();
+        break;
+
+      case "round-end":
+        endRound(d.word, false, d.reason);
+        break;
+
+      case "restart":
+        location.reload();
+        break;
+    }
+  }
+
+  /* =========================================================
+     9. 游戏流程
+     ========================================================= */
+  function pickWord(){
+    return WORDS[Math.floor(Math.random() * WORDS.length)];
+  }
+
+  function startRound(isInitiator, round, word, drawerIsHost){
+    state.round = round || 1;
+    state.drawerIsHost = (typeof drawerIsHost === "boolean") ? drawerIsHost : state.isHost;
+    state.roundActive = true;
+    state.timeLeft = ROUND_SECONDS;
+
+    if (isInitiator){
+      state.word = word || pickWord();
+      // 通知对方：新一轮开始，对方是被画的对象
+      send({
+        type: "round-start",
+        round: state.round,
+        word: state.word,
+        drawerIsHost: state.drawerIsHost
+      });
+    } else {
+      state.word = word || "";
+    }
+
+    clearBoard(true);
+    overlay.classList.add("hide");
+    roundBadge.textContent = "第 " + state.round + " 轮";
+    updateScore();
+    updateBoardLock();
+    startTimer();
+
+    const drawer = iAmDrawer();
+    if (drawer){
+      sysMsg("轮到你先画，题目是「" + state.word + "」（对方要猜）");
+      chatInput.placeholder = "画的时候顺便聊两句…";
+      overlay.classList.remove("hide");
+      overlay.innerHTML = "<div><b>" + state.word + "</b>开始画吧，让对方猜出来</div>";
+      setTimeout(() => overlay.classList.add("hide"), 1800);
+    } else {
+      sysMsg("对方在画，快猜猜看是什么！");
+      chatInput.placeholder = "输入你的猜测…";
+      overlay.classList.remove("hide");
+      overlay.innerHTML = "<div><b>准备好了吗</b>对方正在画，在右下角输入你的猜测</div>";
+      setTimeout(() => overlay.classList.add("hide"), 1800);
+    }
+    chatInput.focus({ preventScroll: true });
+  }
+
+  function startTimer(){
+    stopTimer();
+    renderTimer();
+    state.timerId = setInterval(() => {
+      state.timeLeft--;
+      renderTimer();
+      if (state.timeLeft <= 0){
+        stopTimer();
+        if (iAmDrawer()){
+          // 只有画画的一方负责宣布结束，避免双方都发
+          send({ type: "round-end", word: state.word, reason: "timeout" });
+          endRound(state.word, true, "timeout");
+        }
+      }
+    }, 1000);
+  }
+
+  function stopTimer(){
+    if (state.timerId){ clearInterval(state.timerId); state.timerId = null; }
+  }
+
+  function renderTimer(){
+    const t = Math.max(0, state.timeLeft);
+    timerEl.textContent = "⏱ " + t + "s";
+    timerEl.classList.toggle("hot", t <= 15);
+  }
+
+  function endRound(word, byMe, reason){
+    if (!state.roundActive) return;
+    state.roundActive = false;
+    stopTimer();
+    updateBoardLock();
+
+    if (byMe){
+      sysMsg(reason === "guess"
+        ? "猜对了！答案是「" + word + "」"
+        : "时间到！答案是「" + word + "」");
+    } else if (reason !== "guess"){
+      sysMsg("时间到！答案是「" + word + "」");
+    }
+
+    // 交换画者
+    state.drawerIsHost = !state.drawerIsHost;
+    const nextRound = state.round + 1;
+
+    overlay.classList.remove("hide");
+    overlay.innerHTML = "<div><b>本轮结束</b>答案是「" + word + "」，稍后换人出题…</div>";
+
+    setTimeout(() => {
+      if (!state.connected) return;
+      if (state.isHost){
+        // 房主统一发起下一轮
+        startRound(true, nextRound);
+      } else {
+        // 非房主等待 round-start
+        overlay.innerHTML = "<div><b>等待下一轮</b>房主马上开始新一局…</div>";
+        setTimeout(() => { if (state.roundActive) overlay.classList.add("hide"); }, 2500);
+      }
+    }, 2600);
+  }
+
+  function updateScore(){
+    roundBadge.textContent = "第 " + state.round + " 轮";
+    const el = $("score");
+    if (el) el.textContent = "我 " + state.myScore + " : " + state.peerScore + " 对方";
+  }
+
+  /* =========================================================
+     10. 聊天 / 猜词
+     ========================================================= */
+  function sendChat(){
+    const raw = chatInput.value.trim();
+    if (!raw) return;
+    if (!state.connected){ toast("还没连上对方"); return; }
+
+    chatInput.value = "";
+
+    const myName = state.isHost ? "房主" : "玩家2";
+    // 猜词判断：只对「猜的一方」生效
+    if (!iAmDrawer() && state.roundActive && state.word && raw === state.word){
+      addMsg(raw, "me");
+      sysMsg("你猜对了！答案就是「" + state.word + "」", "correct");
+      send({ type: "correct", raw: raw.slice(0, 60), word: state.word });
+      state.myScore += 1;
+      updateScore();
+      // 猜对即结束本轮
+      send({ type: "round-end", word: state.word, reason: "guess" });
+      endRound(state.word, true, "guess");
+      return;
+    }
+
+    addMsg(raw, "me");
+    send({ type: "chat", text: raw, name: myName });
+  }
+
+  $("sendBtn").addEventListener("click", sendChat);
+  chatInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") sendChat();
+  });
+
+  /* =========================================================
+     11. 初始化
+     ========================================================= */
+  window.addEventListener("resize", () => { resizeCanvas(); });
+  window.addEventListener("orientationchange", () => { setTimeout(resizeCanvas, 260); });
+  if (window.ResizeObserver){
+    new ResizeObserver(() => resizeCanvas()).observe(board.parentElement);
+  }
+  window.addEventListener("beforeunload", () => { resetPeer(); });
+
+  // 支持 URL 直连：?room=xxxxxx 自动填好房间号
+  (function prefill(){
+    const p = new URLSearchParams(location.search);
+    const r = p.get("room");
+    if (r){
+      $("joinCode").value = r.trim().toLowerCase();
+      sysMsg("已从链接读取房间号，点「加入房间」即可");
+    }
+  })();
+
+  resizeCanvas();
+  setStatus("未连接", "");
+  updateBoardLock();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "draw-guess",
+  "version": "1.0.0",
+  "description": "双人 1V1 联机你画我猜（PeerJS WebRTC P2P，纯静态）",
+  "private": true,
+  "scripts": {
+    "dev": "npx --yes http-server -p 8080 -c-1 -o",
+    "start": "npx --yes http-server -p 8080 -c-1 -o"
+  }
+}
