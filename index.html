@@ -876,10 +876,28 @@
     debug: 1,
     config: {
       iceServers: [
+        // STUN：用于探测公网地址，打通大多数家庭网络
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:global.stun.twilio.com:3478" }
-      ]
+        { urls: "stun:stun.cloudflare.com:3478" },
+        { urls: "stun:global.stun.twilio.com:3478" },
+        // TURN：双方都在严格 NAT（运营商 4G、公司网络）时靠中继兜底
+        {
+          urls: [
+            "turn:openrelay.metered.ca:80",
+            "turn:openrelay.metered.ca:443",
+            "turns:openrelay.metered.ca:443?transport=tcp"
+          ],
+          username: "openrelayproject",
+          credential: "openrelayproject"
+        },
+        {
+          urls: "turn:relay1.expressturn.com:3478",
+          username: "efK8GZ0GL2M9Y0N0AT",
+          credential: "x9d1XJ7ZQ2mB0y0T"
+        }
+      ],
+      iceCandidatePoolSize: 4
     }
   };
 
@@ -918,6 +936,14 @@
       roomBox.classList.add("show");
       setStatus("等待对方加入…", "wait");
       sysMsg("房间已创建，房间号：" + pid);
+      errMsg.style.color = "#6b7280";
+      showErr("房间已就绪，保持本页面打开，把房间号发给对方即可。");
+    });
+
+    // 信令断开自动重连（网络抖动时房间不会失效）
+    peer.on("disconnected", () => {
+      setStatus("信令断开，重连中…", "wait");
+      setTimeout(() => { if (!state.connected){ try{ peer.reconnect(); }catch(_){} } }, 800);
     });
 
     peer.on("connection", conn => {
@@ -959,28 +985,49 @@
     let opened = false;
 
     peer.on("open", () => {
+      showErr("已连上信令服务器，正在建立点对点通道…（约 3~15 秒）");
+      errMsg.style.color = "#6b7280";
+
       const conn = peer.connect(code, { reliable: true });
       state.conn = conn;
       bindConn(conn);
+
+      // 监听 ICE 状态，便于定位卡在哪一步
+      try{
+        const pc = conn.peerConnection;
+        if (pc){
+          pc.addEventListener("iceconnectionstatechange", () => {
+            const s = pc.iceConnectionState;
+            if (s === "checking") showErr("正在打洞连接…（网络复杂时可能需要 10 秒）");
+            if (s === "failed"){
+              showErr("点对点连接失败：双方网络限制较严。可让其中一方切换网络（比如手机热点）后重试。");
+            }
+          });
+        }
+      }catch(_){}
 
       // 连接超时保护
       setTimeout(() => {
         if (!state.connected){
           btn.disabled = false;
           btn.textContent = "加入房间";
-          showErr("连接超时。请确认对方房间还在、房间号正确，且双方网络能互连。");
+          errMsg.style.color = "#ef4444";
+          showErr("连接超时。请依次确认：① 对方页面还开着、房间号一模一样；② 对方点过「创建房间」并已显示房间号；③ 双方网络能互连（同一 WiFi 最稳）。");
         }
-      }, 15000);
+      }, 25000);
     });
 
     peer.on("error", err => {
       btn.disabled = false;
       btn.textContent = "加入房间";
+      errMsg.style.color = "#ef4444";
       const map = {
-        "peer-unavailable": "找不到这个房间，请检查房间号是否正确。",
-        "network": "无法连接到信令服务器，请检查网络。",
+        "peer-unavailable": "找不到这个房间。请确认：对方页面还开着、房间号输入正确（小写字母+数字，无空格）。",
+        "network": "连不上信令服务器（0.peerjs.com），请检查网络或代理。",
         "server-error": "信令服务器繁忙，请稍后再试。",
-        "unavailable-id": "ID 冲突，请重试。"
+        "unavailable-id": "ID 冲突，请重试。",
+        "browser-incompatible": "当前浏览器不支持 WebRTC，请换用 Chrome / Edge。",
+        "ssl-unavailable": "页面必须通过 https:// 或 http://localhost 打开，不能用 file://。"
       };
       showErr(map[err.type] || ("加入失败：" + (err.type || err.message)));
     });
