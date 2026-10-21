@@ -40,6 +40,21 @@ GitHub Pages 部署：仓库 Settings → Pages → Source 选 `Deploy from a br
 
 ## 技术说明
 
-- PeerJS 1.5.4（unpkg CDN）负责信令与 P2P 通道
-- 默认使用 PeerJS 公共信令服务器 + Google/Twilio STUN
-- 若双方处于严格 NAT（如部分 4G 网络）下打洞失败，需自建 TURN 中继（如 coturn）并填入 `PEER_OPTS.config.iceServers`
+### 连接方式（双通道自动切换）
+
+1. **P2P 直连**（优先）：PeerJS + WebRTC，延迟最低
+2. **中继通道**（兜底）：MQTT over WebSocket（`wss://broker.emqx.io:8084/mqtt`），
+   直连 6 秒未建立时自动切换。跨运营商、4G、公司内网等严格 NAT 场景都能连通
+
+手动强制中继：在网址后加 `?relay=1`，例如
+`https://xxx.github.io/draw-guess/?relay=1`
+
+### 依赖
+
+- `peerjs.min.js`、`mqtt.min.js` 已放在仓库根目录（本地加载，不依赖境外 CDN）
+- 页面里保留了 jsDelivr 回退，本地文件缺失时会自动从 CDN 拉取
+
+### 说明
+
+- 中继模式的数据会经过公共 MQTT broker，仅供娱乐场景使用，别传敏感内容
+- 房间号是随机 6 位，两个房间撞号概率极低

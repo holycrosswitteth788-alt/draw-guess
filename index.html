@@ -477,7 +477,11 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- 本地依赖优先，加载失败回退 CDN（避免境外 CDN 被墙导致按钮无反应） -->
+<script src="./peerjs.min.js"></script>
+<script>if (typeof Peer === "undefined") { document.write('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"><\/script>'); }</script>
+<script src="./mqtt.min.js"></script>
+<script>if (typeof mqtt === "undefined") { document.write('<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"><\/script>'); }</script>
 <script>
 (function(){
   "use strict";
@@ -507,6 +511,7 @@
     conn: null,
     isHost: false,        // 房主 = 先进入房间画画的人
     connected: false,
+    transport: null,      // "p2p" | "relay"
     roomId: "",
     // 游戏
     drawerIsHost: true,   // 谁在画
@@ -876,28 +881,12 @@
     debug: 1,
     config: {
       iceServers: [
-        // STUN：用于探测公网地址，打通大多数家庭网络
+        // 只用 STUN 做直连探测；严格 NAT 场景交给 MQTT 中继兜底（更快更可靠）
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun.cloudflare.com:3478" },
-        { urls: "stun:global.stun.twilio.com:3478" },
-        // TURN：双方都在严格 NAT（运营商 4G、公司网络）时靠中继兜底
-        {
-          urls: [
-            "turn:openrelay.metered.ca:80",
-            "turn:openrelay.metered.ca:443",
-            "turns:openrelay.metered.ca:443?transport=tcp"
-          ],
-          username: "openrelayproject",
-          credential: "openrelayproject"
-        },
-        {
-          urls: "turn:relay1.expressturn.com:3478",
-          username: "efK8GZ0GL2M9Y0N0AT",
-          credential: "x9d1XJ7ZQ2mB0y0T"
-        }
+        { urls: "stun:stun.cloudflare.com:3478" }
       ],
-      iceCandidatePoolSize: 4
+      iceCandidatePoolSize: 2
     }
   };
 
@@ -924,10 +913,25 @@
     resetPeer();
 
     const id = makeRoomId();
-    const peer = new Peer(id, PEER_OPTS);
-    state.peer = peer;
     state.isHost = true;
     state.roomId = id;
+
+    // 强制中继模式：完全跳过 P2P 信令
+    if (state.forceRelay){
+      btn.disabled = false;
+      btn.textContent = "创建房间";
+      roomCode.textContent = id;
+      roomBox.classList.add("show");
+      setStatus("等待对方加入（中继）…", "wait");
+      sysMsg("房间已创建（中继模式），房间号：" + id);
+      errMsg.style.color = "#6b7280";
+      showErr("中继模式就绪。对方加入时若也走中继，可直接连上。");
+      startRelay(id, true);
+      return;
+    }
+
+    const peer = new Peer(id, PEER_OPTS);
+    state.peer = peer;
 
     peer.on("open", pid => {
       btn.disabled = false;
@@ -938,6 +942,9 @@
       sysMsg("房间已创建，房间号：" + pid);
       errMsg.style.color = "#6b7280";
       showErr("房间已就绪，保持本页面打开，把房间号发给对方即可。");
+
+      // 房主同时在中继频道待命，对方直连失败也能进得来
+      startRelay(pid, true);
     });
 
     // 信令断开自动重连（网络抖动时房间不会失效）
@@ -977,10 +984,27 @@
     btn.textContent = "正在连接…";
     resetPeer();
 
-    const peer = new Peer(PEER_OPTS);
-    state.peer = peer;
     state.isHost = false;
     state.roomId = code;
+
+    // 强制中继：跳过 P2P 信令，直接连中继频道
+    if (state.forceRelay){
+      showErr("正在通过中继服务器连接…");
+      errMsg.style.color = "#6b7280";
+      startRelay(code, false);
+      setTimeout(() => {
+        if (!state.connected){
+          btn.disabled = false;
+          btn.textContent = "加入房间";
+          errMsg.style.color = "#ef4444";
+          showErr("中继连接超时。请确认对方已点「创建房间」并保持页面打开。");
+        }
+      }, 15000);
+      return;
+    }
+
+    const peer = new Peer(PEER_OPTS);
+    state.peer = peer;
 
     let opened = false;
 
@@ -992,16 +1016,22 @@
       state.conn = conn;
       bindConn(conn);
 
+      // 6 秒还没直连成功，就同时开一条中继通道（哪条先通用哪条）
+      setTimeout(() => {
+        if (!state.connected){
+          showErr("直连较慢，正在同时尝试中继通道…");
+          startRelay(state.roomId, false);
+        }
+      }, 6000);
+
       // 监听 ICE 状态，便于定位卡在哪一步
       try{
         const pc = conn.peerConnection;
         if (pc){
           pc.addEventListener("iceconnectionstatechange", () => {
             const s = pc.iceConnectionState;
-            if (s === "checking") showErr("正在打洞连接…（网络复杂时可能需要 10 秒）");
-            if (s === "failed"){
-              showErr("点对点连接失败：双方网络限制较严。可让其中一方切换网络（比如手机热点）后重试。");
-            }
+            if (s === "checking" && !state.connected) showErr("正在打洞连接…（网络复杂时可能需要 10 秒）");
+            if (s === "failed" && !state.connected) showErr("直连失败，正在改走中继通道…");
           });
         }
       }catch(_){}
@@ -1012,19 +1042,35 @@
           btn.disabled = false;
           btn.textContent = "加入房间";
           errMsg.style.color = "#ef4444";
-          showErr("连接超时。请依次确认：① 对方页面还开着、房间号一模一样；② 对方点过「创建房间」并已显示房间号；③ 双方网络能互连（同一 WiFi 最稳）。");
+          showErr("连接超时。请确认：① 对方页面还开着且房间号一模一样；② 对方已看到房间号；③ 对方网络能访问 broker.emqx.io（中继通道）。");
         }
-      }, 25000);
+      }, 30000);
     });
 
     peer.on("error", err => {
+      // 信令出错不再直接放弃，立刻改用中继
+      if (!state.connected && (err.type === "peer-unavailable" || err.type === "network" || err.type === "server-error")){
+        showErr("直连不可用（" + err.type + "），正在改走中继通道…");
+        startRelay(state.roomId, false);
+        setTimeout(() => {
+          if (!state.connected){
+            btn.disabled = false;
+            btn.textContent = "加入房间";
+            errMsg.style.color = "#ef4444";
+            showErr(err.type === "peer-unavailable"
+              ? "找不到这个房间。请确认对方已点「创建房间」、房间号输入正确（小写字母+数字）。"
+              : "连不上服务器，请检查网络后再试。");
+          }
+        }, 12000);
+        return;
+      }
       btn.disabled = false;
       btn.textContent = "加入房间";
       errMsg.style.color = "#ef4444";
       const map = {
         "peer-unavailable": "找不到这个房间。请确认：对方页面还开着、房间号输入正确（小写字母+数字，无空格）。",
-        "network": "连不上信令服务器（0.peerjs.com），请检查网络或代理。",
-        "server-error": "信令服务器繁忙，请稍后再试。",
+        "network": "连不上服务器，请检查网络。",
+        "server-error": "服务器繁忙，请稍后再试。",
         "unavailable-id": "ID 冲突，请重试。",
         "browser-incompatible": "当前浏览器不支持 WebRTC，请换用 Chrome / Edge。",
         "ssl-unavailable": "页面必须通过 https:// 或 http://localhost 打开，不能用 file://。"
@@ -1053,29 +1099,138 @@
   });
 
   /* =========================================================
+     7.5 中继通道（MQTT over WebSocket）
+     用途：P2P 打洞失败时自动兜底，任何网络都能连上
+     ========================================================= */
+  const MQTT_URL = "wss://broker.emqx.io:8084/mqtt";
+  let mqttClient = null;
+  let mqttClientId = null;
+  let relayRoom = "";
+  let relayReady = false;
+
+  const relayTopicOf = room => "drawguess1v1/" + room;
+
+  function relayPublish(obj){
+    if (!mqttClient || !relayReady) return;
+    try{
+      mqttClient.publish(relayTopicOf(relayRoom), JSON.stringify(Object.assign({}, obj, { _from: mqttClientId })));
+    }catch(err){ console.warn("relay publish fail", err); }
+  }
+
+  function startRelay(room, asHost){
+    if (mqttClient) return;
+    if (typeof mqtt === "undefined"){
+      showErr("中继组件未加载，请刷新页面重试");
+      return;
+    }
+    relayRoom = room;
+    mqttClientId = "dg_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+    try{
+      mqttClient = mqtt.connect(MQTT_URL, {
+        clientId: mqttClientId,
+        clean: true,
+        connectTimeout: 8000,
+        reconnectPeriod: 3000,
+        keepalive: 30
+      });
+    }catch(err){
+      console.warn("mqtt connect fail", err);
+      return;
+    }
+
+    mqttClient.on("connect", () => {
+      relayReady = true;
+      mqttClient.subscribe(relayTopicOf(room), { qos: 0 }, () => {});
+      // 稍等一下再打招呼，确保订阅已生效
+      setTimeout(() => {
+        if (!state.connected || state.transport === "relay"){
+          if (!asHost) relayPublish({ type: "relay-join" });
+          else relayPublish({ type: "relay-host-ready" });
+        }
+      }, 400);
+    });
+
+    mqttClient.on("message", (topic, payload) => {
+      let d;
+      try{ d = JSON.parse(payload.toString()); }catch(_){ return; }
+      if (!d || typeof d !== "object") return;
+      if (d._from === mqttClientId) return;          // 忽略自己发的
+      if (state.transport === "p2p" && state.connected) return; // 已有直连就不理中继
+
+      handleRelayMessage(d);
+    });
+
+    mqttClient.on("error", err => console.warn("mqtt error", err));
+    mqttClient.on("reconnect", () => { relayReady = false; });
+  }
+
+  function handleRelayMessage(d){
+    // 握手包
+    if (d.type === "relay-join"){
+      if (state.connected && state.transport === "p2p") return; // 直连优先
+      adoptLink("relay");
+      relayPublish({ type: "relay-ack" });
+      return;
+    }
+    if (d.type === "relay-host-ready"){
+      if (state.connected && state.transport === "p2p") return;
+      adoptLink("relay");
+      relayPublish({ type: "relay-ack" });
+      return;
+    }
+    if (d.type === "relay-ack"){
+      if (state.connected && state.transport === "p2p") return;
+      adoptLink("relay");
+      return;
+    }
+
+    // 普通游戏消息
+    if (state.transport !== "relay") adoptLink("relay");
+    handleData(d);
+  }
+
+  /* =========================================================
      8. 连接建立后的握手与消息路由
      ========================================================= */
+  // 统一入口：无论 p2p 还是 relay，连上后都走这里
+  function adoptLink(mode){
+    if (state.connected) return;
+    state.transport = mode;
+    state.connected = true;
+
+    modal.classList.add("hide");
+    overlay.classList.add("hide");
+    setStatus("已连接" + (mode === "relay" ? "（中继）" : ""), "on");
+    roleTag.textContent = state.isHost ? "房主" : "玩家 2";
+    roleTag.className = "role" + (state.isHost ? "" : " guess");
+    $("btnJoin").disabled = false;
+    $("btnJoin").textContent = "加入房间";
+    $("btnCreate").disabled = false;
+    $("btnCreate").textContent = "创建房间";
+    clearErr();
+
+    if (mode === "relay"){
+      sysMsg("已通过中继服务器连接（直连被网络限制，不影响游玩）");
+      // 中继模式下关掉 P2P 信令，避免重复
+      if (state.conn){ try{ state.conn.close(); }catch(_){} }
+    }
+
+    if (state.isHost){
+      startRound(true, 1);
+      send({ type: "hello", round: state.round });
+    } else {
+      sysMsg("已加入房间，等待房主开始…");
+    }
+    updateBoardLock();
+  }
+
   function bindConn(conn){
     conn.on("open", () => {
-      state.connected = true;
-      modal.classList.add("hide");
-      overlay.classList.add("hide");
-      setStatus("已连接", "on");
-      roleTag.textContent = state.isHost ? "房主" : "玩家 2";
-      roleTag.className = "role" + (state.isHost ? "" : " guess");
-      $("btnJoin").disabled = false;
-      $("btnJoin").textContent = "加入房间";
-      $("btnCreate").disabled = false;
-      $("btnCreate").textContent = "创建房间";
-
-      // 房主发起游戏
-      if (state.isHost){
-        startRound(true, 1);
-        send({ type: "hello", round: state.round });
-      } else {
-        sysMsg("已加入房间，等待房主开始…");
-      }
-      updateBoardLock();
+      // 直连成功。若已经用中继连上了，就不再切换
+      if (state.connected && state.transport === "relay") return;
+      state.transport = "p2p";
+      adoptLink("p2p");
     });
 
     conn.on("data", data => {
@@ -1084,6 +1239,8 @@
     });
 
     conn.on("close", () => {
+      if (state.transport === "relay") return;
+      if (!state.connected) return;
       state.connected = false;
       stopTimer();
       setStatus("对方已断开", "");
@@ -1096,11 +1253,18 @@
 
     conn.on("error", err => {
       console.warn("conn error", err);
-      toast("连接异常：" + (err.type || err.message || "未知"));
+      // P2P 出错时给用户一个明确的切换途径
+      if (!state.connected){
+        showErr("直连未建立，正在尝试中继通道…");
+      }
     });
   }
 
   function send(obj){
+    if (state.transport === "relay"){
+      relayPublish(obj);
+      return;
+    }
     if (state.conn && state.conn.open){
       try{ state.conn.send(obj); }catch(err){ console.warn("send fail", err); }
     }
@@ -1319,9 +1483,13 @@
   }
   window.addEventListener("beforeunload", () => { resetPeer(); });
 
-  // 支持 URL 直连：?room=xxxxxx 自动填好房间号
+  // 支持 URL 直连：?room=xxxxxx 自动填好房间号；?relay=1 强制走中继
   (function prefill(){
     const p = new URLSearchParams(location.search);
+    if (p.get("relay") === "1"){
+      state.forceRelay = true;
+      sysMsg("已启用中继模式（不使用 P2P 直连）");
+    }
     const r = p.get("room");
     if (r){
       $("joinCode").value = r.trim().toLowerCase();
