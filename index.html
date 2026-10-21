@@ -111,6 +111,45 @@
     background:#f4f6fb;padding:4px 9px;border-radius:999px;
     font-variant-numeric:tabular-nums;white-space:nowrap;
   }
+  /* 本回合角色提示 */
+  .turn-tag{
+    font-size:12px;font-weight:600;
+    padding:4px 10px;border-radius:999px;
+    white-space:nowrap;
+    background:#f1f4f9;color:var(--sub);
+    transition:.2s;
+  }
+  .turn-tag.draw{background:#ecfdf3;color:#0a8f54;}
+  .turn-tag.guess{background:#eef2ff;color:var(--brand);}
+  /* 画完了 */
+  .finish-btn{
+    height:26px;border:none;border-radius:8px;
+    background:linear-gradient(135deg,#12b76a,#0ba360);
+    color:#fff;font-size:12px;font-weight:600;
+    padding:0 12px;cursor:pointer;
+    box-shadow:0 3px 10px rgba(18,183,106,.28);
+    transition:.15s;
+  }
+  .finish-btn:hover{filter:brightness(1.06);}
+  .finish-btn:active{transform:scale(.96);}
+  /* 缩放控件 */
+  .zoom-group{
+    display:flex;align-items:center;gap:2px;
+    border:1px solid var(--line);border-radius:8px;
+    background:#fff;padding:1px;
+  }
+  .zoom-group button{
+    height:24px;min-width:24px;border:none;background:transparent;
+    border-radius:6px;cursor:pointer;font-size:13px;color:var(--sub);
+    display:inline-flex;align-items:center;justify-content:center;
+    padding:0 5px;transition:.15s;line-height:1;
+  }
+  .zoom-group button:hover{background:#f1f4f9;color:var(--brand);}
+  .zoom-group .zoom-val{
+    font-size:11px;font-weight:600;color:var(--text);
+    min-width:34px;text-align:center;
+    font-variant-numeric:tabular-nums;cursor:pointer;
+  }
 
   /* 颜色 / 工具 */
   .tools{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap;}
@@ -156,7 +195,8 @@
     width:100%;height:100%;
     display:block;
     touch-action:none;
-    cursor:crosshair;
+    /* 小铅笔光标：深灰笔杆 + 黄色笔身 + 白色描边，白底上清晰可见；热点在笔尖(3,23) */
+    cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 26 26'%3E%3Cpath d='M3 23 L5.5 16.5 L20 2 L24 6 L9.5 20.5 Z' fill='%23ffffff' stroke='%23ffffff' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M3 23 L5.5 16.5 L20 2 L24 6 L9.5 20.5 Z' fill='%23ffd166' stroke='%231f2937' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M3 23 L5.5 16.5 L9.5 20.5 Z' fill='%23f4a261' stroke='%231f2937' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M17.5 4.5 L21.5 8.5' stroke='%231f2937' stroke-width='1.6'/%3E%3C/svg%3E") 3 23, crosshair;
   }
   #board.locked{cursor:not-allowed;}
 
@@ -338,12 +378,18 @@
     .app{padding:6px;gap:6px;}
     header{display:none;}
     main{flex-direction:column;gap:6px;}
-    .chat{flex:0 0 38%;min-height:150px;}
+    .chat{flex:0 0 34%;min-height:140px;}
     .chat-input input{padding:8px 10px;font-size:16px;} /* 防 iOS 缩放 */
     .tools{gap:4px;}
     .swatch{width:20px;height:20px;}
-    .stage-head{padding:6px 8px;gap:6px;}
-    .round-badge,.timer{font-size:11px;padding:3px 8px;}
+    .stage-head{padding:6px 8px;gap:5px;}
+    .round-badge,.timer,.score,.turn-tag{font-size:11px;padding:3px 7px;}
+    /* 手机上让画板占更大空间 */
+    .stage{min-height:0;}
+    /* 放大按钮更易点 */
+    .zoom-group button{height:28px;min-width:28px;font-size:15px;}
+    .zoom-group .zoom-val{font-size:11px;min-width:38px;}
+    .finish-btn{height:28px;padding:0 10px;font-size:11.5px;}
   }
 </style>
 </head>
@@ -361,6 +407,7 @@
       <div class="stage-head">
         <span class="round-badge" id="roundBadge">第 1 轮</span>
         <span class="timer" id="timer">--</span>
+        <span class="turn-tag" id="turnTag">未开始</span>
         <span class="score" id="score">我 0 : 0 对方</span>
         <div class="tools">
           <div id="swatches" style="display:flex;gap:5px;"></div>
@@ -368,6 +415,12 @@
           <button class="icon-btn" id="btnEraser" title="橡皮">橡皮</button>
           <button class="icon-btn" id="btnUndo" title="撤销">撤销</button>
           <button class="icon-btn" id="btnClear" title="清空画板">清空</button>
+          <div class="zoom-group" title="画板缩放（只影响你自己的视野）">
+            <button id="btnZoomOut" aria-label="缩小">－</button>
+            <button class="zoom-val" id="btnZoomReset" title="点击恢复 100%">100%</button>
+            <button id="btnZoomIn" aria-label="放大">＋</button>
+          </div>
+          <button class="finish-btn" id="btnFinish" style="display:none;" title="结束本回合，换对方来画">画完了</button>
         </div>
       </div>
       <div class="canvas-wrap">
@@ -620,6 +673,63 @@
     $("btnClear").disabled = !canDraw;
     $("btnUndo").disabled  = !canDraw;
     $("btnEraser").disabled = !canDraw;
+
+    // 「画完了」只给当前画画的一方显示
+    const fin = $("btnFinish");
+    if (fin) fin.style.display = canDraw ? "inline-flex" : "none";
+
+    // 本回合角色提示
+    const tag = $("turnTag");
+    if (tag){
+      if (!state.connected){
+        tag.textContent = "未入房";
+        tag.className = "turn-tag";
+      } else if (!state.roundActive){
+        tag.textContent = "回合结束";
+        tag.className = "turn-tag";
+      } else if (canDraw){
+        tag.textContent = "本回合：你画";
+        tag.className = "turn-tag draw";
+      } else {
+        tag.textContent = "本回合：你猜";
+        tag.className = "turn-tag guess";
+      }
+    }
+  }
+
+  /* =========================================================
+     4.5 画板缩放（仅影响自己的视野，不影响同步）
+     ========================================================= */
+  const ZOOM_MIN = 1, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
+  let zoom = 1;
+
+  function applyZoom(){
+    if (zoom <= ZOOM_MIN + 0.001) zoom = ZOOM_MIN;
+    if (zoom >= ZOOM_MAX - 0.001) zoom = ZOOM_MAX;
+
+    if (zoom <= 1.001){
+      board.style.width = "100%";
+      board.style.height = "100%";
+      board.style.left = "0";
+      board.style.top = "0";
+    } else {
+      board.style.width  = (zoom * 100) + "%";
+      board.style.height = (zoom * 100) + "%";
+      board.style.left = ((1 - zoom) * 50) + "%";
+      board.style.top  = ((1 - zoom) * 50) + "%";
+    }
+
+    const val = $("btnZoomReset");
+    if (val) val.textContent = Math.round(zoom * 100) + "%";
+
+    // 缩放后重算画布分辨率（并按比例保留已有画面）
+    resizeCanvas();
+  }
+
+  function setZoom(next){
+    zoom = Math.round(next * 100) / 100;
+    applyZoom();
+    if (zoom !== 1) toast("画板 " + Math.round(zoom * 100) + "%（只影响你的视野）");
   }
 
   /* =========================================================
@@ -699,6 +809,26 @@
   $("btnEraser").addEventListener("click", e => {
     state.erasing = !state.erasing;
     e.currentTarget.classList.toggle("active", state.erasing);
+  });
+
+  // 缩放按钮
+  $("btnZoomIn").addEventListener("click", () => setZoom(zoom + ZOOM_STEP));
+  $("btnZoomOut").addEventListener("click", () => setZoom(zoom - ZOOM_STEP));
+  $("btnZoomReset").addEventListener("click", () => setZoom(1));
+
+  // Ctrl + 滚轮缩放画板
+  board.parentElement.addEventListener("wheel", e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    setZoom(zoom + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+  }, { passive: false });
+
+  // 「画完了」：主动结束本回合，换对方画
+  $("btnFinish").addEventListener("click", () => {
+    if (!state.roundActive || !iAmDrawer()) return;
+    if (!confirm("确定画完了吗？确定后会立刻换对方来画。")) return;
+    send({ type: "round-end", word: state.word, reason: "finished" });
+    endRound(state.word, true, "finished");
   });
 
   /* =========================================================
@@ -961,8 +1091,7 @@
         break;
 
       case "correct":
-        // 对方猜中了
-        sysMsg(d.raw + " 猜对了！答案是「" + d.word + "」", "correct");
+        // 对方猜中了：只记分，提示由随后的 round-end 统一播报，避免重复
         state.peerScore += 1;
         updateScore();
         break;
@@ -986,7 +1115,8 @@
 
   function startRound(isInitiator, round, word, drawerIsHost){
     state.round = round || 1;
-    state.drawerIsHost = (typeof drawerIsHost === "boolean") ? drawerIsHost : state.isHost;
+    // 关键：只有明确传入时才覆盖轮换状态，否则保留 endRound 里交换好的结果
+    if (typeof drawerIsHost === "boolean") state.drawerIsHost = drawerIsHost;
     state.roundActive = true;
     state.timeLeft = ROUND_SECONDS;
 
@@ -1012,17 +1142,17 @@
 
     const drawer = iAmDrawer();
     if (drawer){
-      sysMsg("轮到你先画，题目是「" + state.word + "」（对方要猜）");
+      sysMsg("第 " + state.round + " 轮：轮到你画，题目是「" + state.word + "」（对方来猜）");
       chatInput.placeholder = "画的时候顺便聊两句…";
       overlay.classList.remove("hide");
-      overlay.innerHTML = "<div><b>" + state.word + "</b>开始画吧，让对方猜出来</div>";
-      setTimeout(() => overlay.classList.add("hide"), 1800);
+      overlay.innerHTML = "<div><b>" + state.word + "</b>开始画吧，让对方猜出来<br><small style='opacity:.7'>画完可以点右上角「画完了」</small></div>";
+      setTimeout(() => overlay.classList.add("hide"), 2000);
     } else {
-      sysMsg("对方在画，快猜猜看是什么！");
+      sysMsg("第 " + state.round + " 轮：对方画，你来猜");
       chatInput.placeholder = "输入你的猜测…";
       overlay.classList.remove("hide");
       overlay.innerHTML = "<div><b>准备好了吗</b>对方正在画，在右下角输入你的猜测</div>";
-      setTimeout(() => overlay.classList.add("hide"), 1800);
+      setTimeout(() => overlay.classList.add("hide"), 2000);
     }
     chatInput.focus({ preventScroll: true });
   }
@@ -1058,22 +1188,28 @@
     if (!state.roundActive) return;
     state.roundActive = false;
     stopTimer();
-    updateBoardLock();
 
-    if (byMe){
-      sysMsg(reason === "guess"
-        ? "猜对了！答案是「" + word + "」"
-        : "时间到！答案是「" + word + "」");
-    } else if (reason !== "guess"){
+    // 系统提示
+    if (reason === "guess"){
+      if (byMe) sysMsg("你猜对了！答案就是「" + word + "」", "correct");
+      else sysMsg("对方猜对了，答案是「" + word + "」", "correct");
+    } else if (reason === "finished"){
+      sysMsg(byMe ? "你点了「画完了」" : "对方画完了，本回合结束");
+    } else {
       sysMsg("时间到！答案是「" + word + "」");
     }
 
     // 交换画者
     state.drawerIsHost = !state.drawerIsHost;
     const nextRound = state.round + 1;
+    const iDrawNext = iAmDrawer();
+
+    updateBoardLock();
 
     overlay.classList.remove("hide");
-    overlay.innerHTML = "<div><b>本轮结束</b>答案是「" + word + "」，稍后换人出题…</div>";
+    overlay.innerHTML = "<div><b>本回合结束</b>答案是「" + word + "」<br>"
+      + (iDrawNext ? "接下来换<strong>你</strong>画" : "接下来换<strong>对方</strong>画")
+      + "…</div>";
 
     setTimeout(() => {
       if (!state.connected) return;
@@ -1108,11 +1244,10 @@
     // 猜词判断：只对「猜的一方」生效
     if (!iAmDrawer() && state.roundActive && state.word && raw === state.word){
       addMsg(raw, "me");
-      sysMsg("你猜对了！答案就是「" + state.word + "」", "correct");
       send({ type: "correct", raw: raw.slice(0, 60), word: state.word });
       state.myScore += 1;
       updateScore();
-      // 猜对即结束本轮
+      // 猜对即结束本轮（提示由 endRound 统一播报）
       send({ type: "round-end", word: state.word, reason: "guess" });
       endRound(state.word, true, "guess");
       return;
@@ -1147,6 +1282,7 @@
     }
   })();
 
+  applyZoom();
   resizeCanvas();
   setStatus("未连接", "");
   updateBoardLock();
