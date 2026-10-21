@@ -186,9 +186,20 @@
     flex:1 1 auto;
     position:relative;
     min-height:0;
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+    background:#eef1f7;
+  }
+  /* 画纸：固定 4:3 比例，保证手机和电脑上形状完全一致 */
+  .board-frame{
+    position:relative;
     background:#fff;
     background-image:linear-gradient(#f3f5fa 1px,transparent 1px),linear-gradient(90deg,#f3f5fa 1px,transparent 1px);
     background-size:24px 24px;
+    overflow:hidden;
+    border-radius:10px;
+    box-shadow:0 1px 8px rgba(31,41,55,.07);
   }
   #board{
     position:absolute;inset:0;
@@ -424,11 +435,13 @@
         </div>
       </div>
       <div class="canvas-wrap">
-        <canvas id="board"></canvas>
-        <div class="overlay" id="overlay">
-          <div>
-            <b>等待开始</b>
-            创建或加入房间后即可开始游戏
+        <div class="board-frame" id="boardFrame">
+          <canvas id="board"></canvas>
+          <div class="overlay" id="overlay">
+            <div>
+              <b>等待开始</b>
+              创建或加入房间后即可开始游戏
+            </div>
           </div>
         </div>
       </div>
@@ -597,9 +610,28 @@
   /* =========================================================
      4. 画板尺寸 / 绘制
      ========================================================= */
-  // 使用逻辑坐标系：所有轨迹都按 0~1 的归一化坐标传输，
-  // 这样两端屏幕尺寸不同也能对齐。
+  // 关键：画纸固定 4:3。手机和电脑上的画布比例一致，
+  // 归一化坐标（0~1）才能真正还原出同一个图形，不会被拉伸。
+  const BOARD_RATIO = 4 / 3;
+  const frame = document.getElementById("boardFrame");
+
+  function fitFrame(){
+    const wrap = frame.parentElement;
+    const aw = wrap.clientWidth || 1;
+    const ah = wrap.clientHeight || 1;
+    const pad = 8;
+    let w = Math.max(80, aw - pad * 2);
+    let h = w / BOARD_RATIO;
+    if (h > ah - pad * 2){
+      h = Math.max(60, ah - pad * 2);
+      w = h * BOARD_RATIO;
+    }
+    frame.style.width = Math.round(w) + "px";
+    frame.style.height = Math.round(h) + "px";
+  }
+
   function resizeCanvas(){
+    fitFrame();
     const dpr = window.devicePixelRatio || 1;
     const rect = board.getBoundingClientRect();
     const w = Math.max(1, Math.floor(rect.width * dpr));
@@ -630,6 +662,11 @@
     return { w: r.width || 1, h: r.height || 1 };
   }
 
+  // 笔宽统一按「画布宽度的比例」传递，两端视觉粗细才一致
+  function pxWidthFromRatio(ratio){
+    return Math.max(0.6, ratio * cssSize().w);
+  }
+
   function clearBoard(silent){
     const { w, h } = cssSize();
     ctx.save();
@@ -640,13 +677,13 @@
     if (!silent && state.connected) send({ type: "clear" });
   }
 
-  // 画一段线（归一化坐标）
-  function drawSeg(x0, y0, x1, y1, color, width, erase){
+  // 画一段线（坐标归一化；wRatio = 笔宽 / 画布宽度）
+  function drawSeg(x0, y0, x1, y1, color, wRatio, erase){
     const { w, h } = cssSize();
     ctx.save();
     ctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
     ctx.strokeStyle = color;
-    ctx.lineWidth = width;
+    ctx.lineWidth = pxWidthFromRatio(wRatio);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -656,13 +693,13 @@
     ctx.restore();
   }
 
-  function drawDot(x, y, color, width, erase){
+  function drawDot(x, y, color, wRatio, erase){
     const { w, h } = cssSize();
     ctx.save();
     ctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(x * w, y * h, width / 2, 0, Math.PI * 2);
+    ctx.arc(x * w, y * h, pxWidthFromRatio(wRatio) / 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -750,17 +787,20 @@
 
   board.addEventListener("pointerdown", e => {
     if (!iAmDrawer() || !state.roundActive) return;
-    board.setPointerCapture(e.pointerId);
+    // 部分浏览器/输入源下 setPointerCapture 可能抛错，不能让它阻断绘制
+    try{ board.setPointerCapture(e.pointerId); }catch(_){}
     state.drawing = true;
     const p = getNorm(e);
     state.lastPt = p;
     const erase = state.erasing;
-    const width = erase ? state.size * 3 : state.size;
+    const widthPx = erase ? state.size * 3 : state.size;
+    // 转成「占画布宽度的比例」，这样对方无论屏幕多大，笔迹粗细都一致
+    const wRatio = widthPx / cssSize().w;
     const color = state.color;
 
-    drawDot(p.x, p.y, color, width, erase);
-    state.localStrokes.push({ op: "dot", p: [p.x, p.y], c: color, w: width, e: erase ? 1 : 0 });
-    send({ type: "draw", op: "dot", p: [p.x, p.y], c: color, w: width, e: erase ? 1 : 0 });
+    drawDot(p.x, p.y, color, wRatio, erase);
+    state.localStrokes.push({ op: "dot", p: [p.x, p.y], c: color, w: wRatio, e: erase ? 1 : 0 });
+    send({ type: "draw", op: "dot", p: [p.x, p.y], c: color, w: wRatio, wr: 1, e: erase ? 1 : 0 });
   });
 
   board.addEventListener("pointermove", e => {
@@ -776,13 +816,14 @@
       if (Math.abs(p.x - last.x) < 0.0008 && Math.abs(p.y - last.y) < 0.0008) continue;
 
       const erase = state.erasing;
-      const width = erase ? state.size * 3 : state.size;
+      const widthPx = erase ? state.size * 3 : state.size;
+      const wRatio = widthPx / cssSize().w;
       const color = state.color;
 
-      drawSeg(last.x, last.y, p.x, p.y, color, width, erase);
-      const seg = { op: "seg", p: [last.x, last.y, p.x, p.y], c: color, w: width, e: erase ? 1 : 0 };
+      drawSeg(last.x, last.y, p.x, p.y, color, wRatio, erase);
+      const seg = { op: "seg", p: [last.x, last.y, p.x, p.y], c: color, w: wRatio, e: erase ? 1 : 0 };
       state.localStrokes.push(seg);
-      send({ type: "draw", op: "seg", p: seg.p, c: color, w: width, e: erase ? 1 : 0 });
+      send({ type: "draw", op: "seg", p: seg.p, c: color, w: wRatio, wr: 1, e: erase ? 1 : 0 });
       state.lastPt = p;
     }
   });
@@ -806,7 +847,7 @@
       if (s.op === "dot") drawDot(s.p[0], s.p[1], s.c, s.w, s.e === 1);
       else drawSeg(s.p[0], s.p[1], s.p[2], s.p[3], s.c, s.w, s.e === 1);
     }
-    send({ type: "replay", strokes: strokes });
+    send({ type: "replay", strokes: strokes.map(s => Object.assign({}, s, { wr: 1 })) });
   }
 
   $("btnUndo").addEventListener("click", undo);
@@ -1273,15 +1314,17 @@
   function handleData(d){
     switch(d.type){
       case "draw": {
-        if (d.op === "dot") drawDot(d.p[0], d.p[1], d.c, d.w, d.e === 1);
-        else drawSeg(d.p[0], d.p[1], d.p[2], d.p[3], d.c, d.w, d.e === 1);
+        const wr = (d.wr === 1) ? d.w : (d.w / cssSize().w);
+        if (d.op === "dot") drawDot(d.p[0], d.p[1], d.c, wr, d.e === 1);
+        else drawSeg(d.p[0], d.p[1], d.p[2], d.p[3], d.c, wr, d.e === 1);
         break;
       }
       case "replay": {
         clearBoard(true);
         for (const s of (d.strokes || [])){
-          if (s.op === "dot") drawDot(s.p[0], s.p[1], s.c, s.w, s.e === 1);
-          else drawSeg(s.p[0], s.p[1], s.p[2], s.p[3], s.c, s.w, s.e === 1);
+          const wr = (s.wr === 1) ? s.w : (s.w / cssSize().w);
+          if (s.op === "dot") drawDot(s.p[0], s.p[1], s.c, wr, s.e === 1);
+          else drawSeg(s.p[0], s.p[1], s.p[2], s.p[3], s.c, wr, s.e === 1);
         }
         break;
       }
@@ -1479,7 +1522,8 @@
   window.addEventListener("resize", () => { resizeCanvas(); });
   window.addEventListener("orientationchange", () => { setTimeout(resizeCanvas, 260); });
   if (window.ResizeObserver){
-    new ResizeObserver(() => resizeCanvas()).observe(board.parentElement);
+    // 监听外层容器（画纸尺寸由 JS 按 4:3 计算，避免自身变化触发循环）
+    new ResizeObserver(() => resizeCanvas()).observe(document.querySelector(".canvas-wrap"));
   }
   window.addEventListener("beforeunload", () => { resetPeer(); });
 
