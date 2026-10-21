@@ -465,7 +465,7 @@
 <!-- 连接弹窗 -->
 <div class="modal" id="modal">
   <div class="card">
-    <h1>你画我猜 1V1</h1>
+    <h1>你画我猜 1V1 <small style="font-size:12px;color:#9ca3af;font-weight:normal;">v7</small></h1>
     <p class="sub">创建一个房间，把房间号发给朋友，两人就能直接联机画画了。</p>
 
     <button class="btn primary" id="btnCreate">创建房间</button>
@@ -498,6 +498,7 @@
 <script>
 (function(){
   "use strict";
+  console.log("DrawGuess v7（多点触控防误触 + 批量折线传输）");
 
   /* =========================================================
      1. 常量与状态
@@ -540,6 +541,7 @@
     size: 5,
     erasing: false,
     drawing: false,
+    activePointerId: null, // 正在画画的那根手指
     lastPt: null,
     // 发送节流：攒点批量发
     batch: [],
@@ -825,6 +827,9 @@
   const SEND_MAX_POINTS = 24; // 单条消息最多点数
 
   function beginStrokeBatch(){
+    // 保险：上一笔若有没发出去的点，先补发，绝不静默丢弃
+    if (state.batch && state.batch.length) flushStrokeBatch();
+
     state.batch = [];
     state.batchStyle = {
       c: state.color,
@@ -863,12 +868,16 @@
 
   board.addEventListener("pointerdown", e => {
     if (!iAmDrawer() || !state.roundActive) return;
+    // 多点触控防护：已经在画时，第二根手指/手掌误触直接忽略。
+    // 否则会清掉还没发出去的点（对面就缺一段）、混入手掌坐标、还提前结束这一笔。
+    if (state.drawing) return;
     // 部分浏览器/输入源下 setPointerCapture 可能抛错，不能让它阻断绘制
     try{ board.setPointerCapture(e.pointerId); }catch(_){}
     // 起笔时刷新一次画板矩形：手机浏览器拖动时地址栏会伸缩，画板位置跟着变，
     // 缓存若不刷新，整笔轨迹都会错位
     measureBoard();
     state.drawing = true;
+    state.activePointerId = e.pointerId;
     const p = getNorm(e);
     state.lastPt = p;
 
@@ -888,6 +897,8 @@
 
   board.addEventListener("pointermove", e => {
     if (!state.drawing || !iAmDrawer()) return;
+    // 只处理起笔的那根手指，其他手指的移动不参与绘画
+    if (state.activePointerId != null && e.pointerId !== state.activePointerId) return;
     // 合并事件，提高流畅度
     let evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
     if (!evs || !evs.length) evs = [e];
@@ -911,12 +922,16 @@
     }
   });
 
-  function endStroke(){
+  function endStroke(e){
     if (!state.drawing) return;
+    // 只有起笔的那根手指抬起/被系统取消，这一笔才算结束；
+    // 其他手指抬起不影响正在画的笔
+    if (e && state.activePointerId != null && e.pointerId !== state.activePointerId) return;
     stopTicker();
     flushStrokeBatch();
     state.drawing = false;
     state.lastPt = null;
+    state.activePointerId = null;
   }
   board.addEventListener("pointerup", endStroke);
   board.addEventListener("pointercancel", endStroke);
