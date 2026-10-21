@@ -541,6 +541,11 @@
     erasing: false,
     drawing: false,
     lastPt: null,
+    // 发送节流：攒点批量发
+    batch: [],
+    batchStyle: null,
+    batchLast: null,
+    batchAt: 0,
     localStrokes: []      // 用于本地撤销
   };
 
@@ -633,9 +638,9 @@
   function resizeCanvas(){
     fitFrame();
     const dpr = window.devicePixelRatio || 1;
-    const rect = board.getBoundingClientRect();
-    const w = Math.max(1, Math.floor(rect.width * dpr));
-    const h = Math.max(1, Math.floor(rect.height * dpr));
+    const rect = measureBoard();
+    const w = Math.max(1, Math.floor(rect.w * dpr));
+    const h = Math.max(1, Math.floor(rect.h * dpr));
     if (board.width === w && board.height === h) return;
 
     // 保存当前画面并还原
@@ -657,9 +662,18 @@
     }
   }
 
-  function cssSize(){
+  // 缓存画板矩形：每画一个点都调 getBoundingClientRect() 会反复触发布局计算，
+  // 手机上尤其拖慢笔迹。只在尺寸变化时重新测量。
+  let boardRect = { x: 0, y: 0, w: 1, h: 1 };
+
+  function measureBoard(){
     const r = board.getBoundingClientRect();
-    return { w: r.width || 1, h: r.height || 1 };
+    boardRect = { x: r.left, y: r.top, w: r.width || 1, h: r.height || 1 };
+    return boardRect;
+  }
+
+  function cssSize(){
+    return { w: boardRect.w || 1, h: boardRect.h || 1 };
   }
 
   // 笔宽统一按「画布宽度的比例」传递，两端视觉粗细才一致
@@ -689,6 +703,25 @@
     ctx.beginPath();
     ctx.moveTo(x0 * w, y0 * h);
     ctx.lineTo(x1 * w, y1 * h);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 一条折线：p = [x0,y0, x1,y1, ...]（归一化），一次性 stroke
+  function drawPath(p, color, wRatio, erase){
+    if (!p || p.length < 4) return;
+    const { w, h } = cssSize();
+    ctx.save();
+    ctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = pxWidthFromRatio(wRatio);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(p[0] * w, p[1] * h);
+    for (let i = 2; i + 1 < p.length; i += 2){
+      ctx.lineTo(p[i] * w, p[i + 1] * h);
+    }
     ctx.stroke();
     ctx.restore();
   }
@@ -778,20 +811,68 @@
      5. 绘图交互（Pointer Events 统一鼠标 / 触摸）
      ========================================================= */
   function getNorm(e){
-    const r = board.getBoundingClientRect();
+    const r = boardRect;
     return {
-      x: (e.clientX - r.left) / (r.width || 1),
-      y: (e.clientY - r.top) / (r.height || 1)
+      x: (e.clientX - r.x) / r.w,
+      y: (e.clientY - r.y) / r.h
     };
+  }
+
+  /* ---------- 发送节流：把密集的点攒成一条折线，40ms 发一次 ---------- */
+  // 手机一次滑动会产生 100+ 个 move 事件，逐点发送会把通道打满，
+  // 对方就表现为「断断续续」。改成批量折线后消息量下降 10 倍以上。
+  const SEND_INTERVAL = 40;   // ms
+  const SEND_MAX_POINTS = 24; // 单条消息最多点数
+
+  function beginStrokeBatch(){
+    state.batch = [];
+    state.batchStyle = {
+      c: state.color,
+      w: (state.erasing ? state.size * 3 : state.size) / cssSize().w,
+      e: state.erasing ? 1 : 0
+    };
+    state.batchAt = performance.now();
+    state.batchLast = null;
+
+    // 用定时器稳定出包：只靠 pointermove 里的时间判断会被事件节奏带偏，
+    // 结果一秒钟只发几条、对方看到的是「一跳一跳」。定时器保证固定 25fps。
+    stopTicker();
+    state.ticker = setInterval(() => flushStrokeBatch(), SEND_INTERVAL);
+  }
+
+  function stopTicker(){
+    if (state.ticker){ clearInterval(state.ticker); state.ticker = null; }
+  }
+
+  function flushStrokeBatch(){
+    if (!state.batch) state.batch = [];
+    if (!state.batch.length) return;
+
+    const pts = state.batch.slice();
+    // 补上上一批的终点，保证折线首尾相接不断笔
+    if (state.batchLast) pts.unshift(state.batchLast.x, state.batchLast.y);
+    // 少于两个点画不出线段，留着等下一批
+    if (pts.length < 4) return;
+
+    state.batch = [];
+    state.batchLast = { x: pts[pts.length - 2], y: pts[pts.length - 1] };
+    state.batchAt = performance.now();
+    const st = state.batchStyle;
+    send({ type: "draw", op: "path", p: pts, c: st.c, w: st.w, wr: 1, e: st.e });
   }
 
   board.addEventListener("pointerdown", e => {
     if (!iAmDrawer() || !state.roundActive) return;
     // 部分浏览器/输入源下 setPointerCapture 可能抛错，不能让它阻断绘制
     try{ board.setPointerCapture(e.pointerId); }catch(_){}
+    // 起笔时刷新一次画板矩形：手机浏览器拖动时地址栏会伸缩，画板位置跟着变，
+    // 缓存若不刷新，整笔轨迹都会错位
+    measureBoard();
     state.drawing = true;
     const p = getNorm(e);
     state.lastPt = p;
+
+    beginStrokeBatch();
     const erase = state.erasing;
     const widthPx = erase ? state.size * 3 : state.size;
     // 转成「占画布宽度的比例」，这样对方无论屏幕多大，笔迹粗细都一致
@@ -801,6 +882,8 @@
     drawDot(p.x, p.y, color, wRatio, erase);
     state.localStrokes.push({ op: "dot", p: [p.x, p.y], c: color, w: wRatio, e: erase ? 1 : 0 });
     send({ type: "draw", op: "dot", p: [p.x, p.y], c: color, w: wRatio, wr: 1, e: erase ? 1 : 0 });
+    // 记下起点，后面第一批折线才能和这个点接上
+    state.batchLast = { x: p.x, y: p.y };
   });
 
   board.addEventListener("pointermove", e => {
@@ -815,21 +898,23 @@
       // 过滤过短线段
       if (Math.abs(p.x - last.x) < 0.0008 && Math.abs(p.y - last.y) < 0.0008) continue;
 
-      const erase = state.erasing;
-      const widthPx = erase ? state.size * 3 : state.size;
-      const wRatio = widthPx / cssSize().w;
-      const color = state.color;
-
-      drawSeg(last.x, last.y, p.x, p.y, color, wRatio, erase);
-      const seg = { op: "seg", p: [last.x, last.y, p.x, p.y], c: color, w: wRatio, e: erase ? 1 : 0 };
-      state.localStrokes.push(seg);
-      send({ type: "draw", op: "seg", p: seg.p, c: color, w: wRatio, wr: 1, e: erase ? 1 : 0 });
+      // 本地立即绘制，保证自己这边跟手
+      drawSeg(last.x, last.y, p.x, p.y, state.batchStyle.c, state.batchStyle.w, state.batchStyle.e === 1);
+      state.localStrokes.push({ op: "seg", p: [last.x, last.y, p.x, p.y], c: state.batchStyle.c, w: state.batchStyle.w, e: state.batchStyle.e });
       state.lastPt = p;
+
+      // 只攒点；出包节奏交给定时器，这里只防单条消息过大
+      state.batch.push(+p.x.toFixed(3), +p.y.toFixed(3));
+      if (state.batch.length >= SEND_MAX_POINTS * 2){
+        flushStrokeBatch();
+      }
     }
   });
 
   function endStroke(){
     if (!state.drawing) return;
+    stopTicker();
+    flushStrokeBatch();
     state.drawing = false;
     state.lastPt = null;
   }
@@ -1302,6 +1387,11 @@
   }
 
   function send(obj){
+    // 统计绘制消息量（调试用，开销可忽略）
+    if (obj && obj.type === "draw"){
+      state.sentCount = (state.sentCount || 0) + 1;
+      state.sentPts = (state.sentPts || 0) + (Array.isArray(obj.p) ? obj.p.length / 2 : 1);
+    }
     if (state.transport === "relay"){
       relayPublish(obj);
       return;
@@ -1316,6 +1406,7 @@
       case "draw": {
         const wr = (d.wr === 1) ? d.w : (d.w / cssSize().w);
         if (d.op === "dot") drawDot(d.p[0], d.p[1], d.c, wr, d.e === 1);
+        else if (d.op === "path") drawPath(d.p, d.c, wr, d.e === 1);
         else drawSeg(d.p[0], d.p[1], d.p[2], d.p[3], d.c, wr, d.e === 1);
         break;
       }
@@ -1324,6 +1415,7 @@
         for (const s of (d.strokes || [])){
           const wr = (s.wr === 1) ? s.w : (s.w / cssSize().w);
           if (s.op === "dot") drawDot(s.p[0], s.p[1], s.c, wr, s.e === 1);
+          else if (s.op === "path") drawPath(s.p, s.c, wr, s.e === 1);
           else drawSeg(s.p[0], s.p[1], s.p[2], s.p[3], s.c, wr, s.e === 1);
         }
         break;
@@ -1520,6 +1612,12 @@
      11. 初始化
      ========================================================= */
   window.addEventListener("resize", () => { resizeCanvas(); });
+  // 手机地址栏伸缩 / 滚动都会移动画板，这些时机要刷新缓存矩形
+  if (window.visualViewport){
+    visualViewport.addEventListener("resize", measureBoard);
+    visualViewport.addEventListener("scroll", measureBoard);
+  }
+  document.addEventListener("scroll", measureBoard, true);
   window.addEventListener("orientationchange", () => { setTimeout(resizeCanvas, 260); });
   if (window.ResizeObserver){
     // 监听外层容器（画纸尺寸由 JS 按 4:3 计算，避免自身变化触发循环）
@@ -1545,6 +1643,14 @@
   resizeCanvas();
   setStatus("未连接", "");
   updateBoardLock();
+
+  // 调试句柄（不影响功能）：自动化测试 / 排查坐标问题时用
+  window.__dg = {
+    state,
+    cache: () => ({ ...boardRect }),
+    live: () => { const r = board.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; },
+    measure: measureBoard
+  };
 })();
 </script>
 </body>
